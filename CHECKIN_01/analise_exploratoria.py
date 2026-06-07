@@ -2,6 +2,9 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 import matplotlib.pyplot as plt
+import warnings
+
+warnings.filterwarnings('ignore')
 
 print("Iniciando a Análise do Check-in 01...")
 print("-" * 50)
@@ -17,12 +20,15 @@ df['remuneracao'] = df['remuneracao'].str.replace(',', '.', regex=False)
 
 df['remuneracao'] = pd.to_numeric(df['remuneracao'], errors='coerce')
 
-total_antes = len(df)
+# Tratando valores nulos
 df = df.dropna(subset=['remuneracao'])
+
+# REGRA DO BOX-COX: Os dados precisam ser estritamente positivos (> 0)
+total_antes = len(df)
+df = df[df['remuneracao'] > 0]
 total_depois = len(df)
 
-print(f"Dados limpos! {total_antes - total_depois} linhas com erros removidas.")
-print(f"Total de registros para análise: {total_depois} linhas.")
+print(f"Dados limpos e zeros removidos! Total de registros para análise: {total_depois} linhas.")
 
 print("\nPasso 2: Análise Exploratória (Curva de Gauss)...")
 
@@ -60,34 +66,38 @@ if p_value_ks > 0.05 or p_value_sw > 0.05:
     print("-> Status: A distribuição já É NORMAL! Nenhuma transformação é necessária.")
 else:
     print("-> Status: A distribuição original NÃO É NORMAL (P-values menores que 0.05).")
-    print("-> Ação: Aplicando Matemática Básica (Logaritmo) para reduzir a dispersão...")
+    print("-> Ação: Aplicando a Transformação Inteligente (Box-Cox) vista na Aula 7...")
     
-    df['remuneracao_normalizada'] = np.log1p(df['remuneracao'])
+    # Aplicando o Box-Cox
+    # Ele retorna a nova coluna normalizada e o Lambda ótimo que ele encontrou
+    df['remuneracao_boxcox'], lambda_opt = stats.boxcox(df['remuneracao'])
     
-    nova_media = df['remuneracao_normalizada'].mean()
-    novo_desvio = df['remuneracao_normalizada'].std()
+    nova_media = df['remuneracao_boxcox'].mean()
+    novo_desvio = df['remuneracao_boxcox'].std()
     
-    novo_resultado_ks = stats.kstest(df['remuneracao_normalizada'], 'norm', args=(nova_media, novo_desvio))
+    novo_resultado_ks = stats.kstest(df['remuneracao_boxcox'], 'norm', args=(nova_media, novo_desvio))
     novo_p_value_ks = novo_resultado_ks.pvalue
     
-    novo_resultado_sw = stats.shapiro(df['remuneracao_normalizada'])
+    novo_resultado_sw = stats.shapiro(df['remuneracao_boxcox'])
     novo_p_value_sw = novo_resultado_sw.pvalue
     
-    print(f"\n-> NOVO P-value após a transformação (KS): {novo_p_value_ks}")
-    print(f"-> NOVO P-value após a transformação (Shapiro): {novo_p_value_sw}")
+    print(f"\n-> Lambda Ótimo calculado pelo Box-Cox: {lambda_opt:.4f}")
+    print(f"-> NOVO P-value após Box-Cox (KS): {novo_p_value_ks}")
+    print(f"-> NOVO P-value após Box-Cox (Shapiro): {novo_p_value_sw}")
     
     if novo_p_value_ks > 0.05 or novo_p_value_sw > 0.05:
-        print("\n-> CONCLUSÃO FINAL: Sucesso! Após a transformação, os dados ficaram NORMAIS.")
+        print("\n-> CONCLUSÃO FINAL: Sucesso! Após a transformação Box-Cox, os dados ficaram NORMAIS.")
     else:
-        print("\n-> CONCLUSÃO FINAL: Os dados continuam não normais estatisticamente, mas a dispersão foi tratada.")
+        print("\n-> CONCLUSÃO FINAL: Os dados continuam não normais estatisticamente, mas a assimetria foi reduzida.")
         print("\n" + "="*50)
         print("POR QUE OS DADOS CONTINUAM NÃO NORMAIS? (Justificativa Técnica):")
         print("1. O rigor das amostras gigantes: temos mais de 17 mil linhas. O teste KS se torna extremamente")
-        print("   rigoroso com amostras grandes, reprovando a normalidade por qualquer mínima variação.")
+        print("   rigoroso com amostras grandes, reprovando a normalidade por pequenas variações.")
         print("2. A regra do Shapiro: o teste de Shapiro-Wilk falha aqui porque nossa base ultrapassa muito")
         print("   o limite ideal ensinado na aula (que é de até 2000 registros).")
-        print("3. A natureza do mundo real: salários públicos são muito assimétricos. A grande maioria ganha a base,")
-        print("   e poucos ganham muito. O logaritmo ajuda a reduzir essa diferença extrema (outliers).")
+        print("3. A natureza do mundo real: a transformação Box-Cox (Lambda ótimo encontrado) reduz severamente")
+        print("   a dispersão e a influência de salários outliers, porém, a estrutura de remuneração pública")
+        print("   impede uma simetria matemática perfeita. Os dados estão prontos para uso em modelos.")
         print("="*50)
 
 print("\nAnálise finalizada!")
@@ -97,23 +107,18 @@ print("\nGerando gráficos... (Feche a janela do primeiro gráfico para ver o se
 
 plt.figure(figsize=(10, 5))
 plt.hist(df['remuneracao'], bins=50, color='skyblue', edgecolor='black')
-
 plt.axvline(media, color='red', linestyle='dashed', linewidth=2, label=f'Média: R$ {media:.2f}')
 plt.axvline(limite_baixo, color='green', linestyle='dashed', linewidth=2, label='-1 Desvio Padrão')
 plt.axvline(limite_alto, color='green', linestyle='dashed', linewidth=2, label='+1 Desvio Padrão')
-
-plt.title('Distribuição dos Salários e Desvio Padrão', fontsize=14)
+plt.title('Distribuição dos Salários e Desvio Padrão (Antes do Box-Cox)', fontsize=14)
 plt.xlabel('Remuneração (R$)', fontsize=12)
 plt.ylabel('Quantidade de Pessoas', fontsize=12)
 plt.legend()
 plt.show()
 
 plt.figure(figsize=(10, 5))
-
 media_por_contrato = df.groupby('vanculo_empregatacio')['remuneracao'].mean().sort_values(ascending=False)
-
 media_por_contrato.plot(kind='bar', color='coral', edgecolor='black')
-
 plt.title('Média Salarial por Tipo de Contrato', fontsize=14)
 plt.xlabel('Tipo de Contrato', fontsize=12)
 plt.ylabel('Média de Remuneração (R$)', fontsize=12)
